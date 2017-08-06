@@ -49,6 +49,7 @@
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cuid/1.3.8/browser-cuid.min.js"></script>
 <script>
   $(function () {
 
@@ -60,7 +61,7 @@
     });
 
     socket.on("chat message", function (msg) {
-      render(msg.room, msg.user, msg.message);
+      render(msg.room, msg.user, msg.message, msg.id);
     });
 
     socket.on("join room", function (msg) {
@@ -108,7 +109,8 @@
       socket.emit("chat message", {
         user: user,
         room: currentRoom,
-        message: message.val()
+        message: message.val(),
+        id: cuid()
       });
       message.val("");
       return false;
@@ -122,11 +124,11 @@
       return false;
     });
 
-    function render(room, user, message) {
+    function render(room, user, message, id) {
       var li = $("<li>").append($("<div>").addClass("room").text(room));
       if (message) {
         li.append($("<div>").addClass("user").text(user));
-        li.append($("<div>").addClass("message").text(message));
+        li.append($("<div>").addClass(id).addClass("message").text(message));
       } else {
         li.append($("<div>").addClass("event").text(user));
       }

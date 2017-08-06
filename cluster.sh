@@ -27,30 +27,43 @@ stopNode() {
   fi
 }
 
+stop() {
+    stopNode 1
+    stopNode 2
+    stopNode 3
+
+    if [ -e target/nginx.pid ]
+    then
+        kill `cat target/nginx.pid`
+    fi
+}
+
+start() {
+    # Ensure the project is built
+    sbt stage
+
+    startNode 1
+    startNode 2
+    startNode 3
+
+    nginx -p $wd -c nginx.conf &
+}
+
 case $1 in
 
-    start)
+    restart)
 
-        # Ensure the project is built
-        sbt stage
-
-        startNode 1
-        startNode 2
-        startNode 3
-
-        nginx -p $wd -c nginx.conf &
+        stop ; start
     ;;
 
     stop)
 
-        stopNode 1
-        stopNode 2
-        stopNode 3
-
-        if [ -e target/nginx.pid ]
-        then
-            kill `cat target/nginx.pid`
-        fi
-
+        stop
     ;;
+
+    start)
+
+        start
+    ;;
+
 esac

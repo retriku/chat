@@ -1,7 +1,7 @@
 package chat
 
 import akka.NotUsed
-import akka.actor.ActorSystem
+import akka.actor.{ ActorRef, ActorSystem }
 import akka.cluster.pubsub.DistributedPubSub
 import akka.cluster.pubsub.DistributedPubSubMediator.{ Publish, Subscribe }
 import akka.stream._
@@ -20,7 +20,11 @@ sealed trait ChatEvent {
   def room: String
 }
 
-case class ChatMessage(user: Option[User], room: String, message: String) extends ChatEvent
+case class ChatMessage(
+  user: Option[User],
+  room: String,
+  message: String,
+  id: String) extends ChatEvent
 object ChatMessage {
   implicit val format: Format[ChatMessage] = Json.format
 }
@@ -44,27 +48,31 @@ object User {
 object ChatProtocol {
   import play.socketio.scaladsl.SocketIOEventCodec._
 
-  val decoder = decodeByName {
+  val decoder: SocketIOEventsDecoder[ChatEvent] = decodeByName {
     case "chat message" => decodeJson[ChatMessage]
     case "join room" => decodeJson[JoinRoom]
     case "leave room" => decodeJson[LeaveRoom]
   }
 
-  val encoder = encodeByType[ChatEvent] {
+  val encoder: SocketIOEventsEncoder[ChatEvent] = encodeByType[ChatEvent] {
     case _: ChatMessage => "chat message" -> encodeJson[ChatMessage]
     case _: JoinRoom => "join room" -> encodeJson[JoinRoom]
     case _: LeaveRoom => "leave room" -> encodeJson[LeaveRoom]
   }
 }
 
-class ChatEngine(socketIO: SocketIO, system: ActorSystem)(implicit mat: Materializer) {
+class ChatEngine(
+  socketIO: SocketIO,
+  system: ActorSystem)(implicit mat: Materializer) {
 
   import ChatProtocol._
 
-  val mediator = DistributedPubSub(system).mediator
+  val mediator: ActorRef = DistributedPubSub(system).mediator
 
   // This gets a chat room using Akka distributed pubsub
-  private def getChatRoom(user: User, room: String) = {
+  private def getChatRoom(
+    user: User,
+    room: String): Flow[ChatEvent, ChatEvent, NotUsed] = {
 
     // Create a sink that sends all the messages to the chat room
     val sink = Sink.foreach[ChatEvent] { message =>
@@ -78,12 +86,12 @@ class ChatEngine(socketIO: SocketIO, system: ActorSystem)(implicit mat: Material
       }
 
     Flow.fromSinkAndSourceCoupled(
-      Flow[ChatEvent]
+      sink = Flow[ChatEvent]
         // Add the join and leave room events
         .prepend(Source.single(JoinRoom(Some(user), room)))
         .concat(Source.single(LeaveRoom(Some(user), room)))
         .to(sink),
-      source)
+      source = source)
   }
 
   // Creates a chat flow for a user session
@@ -115,13 +123,19 @@ class ChatEngine(socketIO: SocketIO, system: ActorSystem)(implicit mat: Material
 
         event
 
-      case ChatMessage(_, room, message) =>
-        ChatMessage(Some(user), room, message)
+      case ChatMessage(_, room, message, id) =>
+        ChatMessage(
+          user = Some(user),
+          room = room,
+          message = message,
+          id = id)
 
       case other => other
 
     } via {
-      Flow.fromSinkAndSourceCoupledMat(BroadcastHub.sink[ChatEvent], MergeHub.source[ChatEvent]) { (source, sink) =>
+      Flow.fromSinkAndSourceCoupledMat(
+        sink = BroadcastHub.sink[ChatEvent],
+        source = MergeHub.source[ChatEvent]) { (source, sink) =>
         broadcastSource = source
         mergeSink = sink
         NotUsed
