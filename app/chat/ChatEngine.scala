@@ -1,57 +1,63 @@
 package chat
 
 import akka.NotUsed
-import akka.actor.{ ActorRef, ActorSystem }
+import akka.actor.{ActorRef, ActorSystem}
 import akka.cluster.pubsub.DistributedPubSub
-import akka.cluster.pubsub.DistributedPubSubMediator.{ Publish, Subscribe }
+import akka.cluster.pubsub.DistributedPubSubMediator.{Publish, Subscribe}
 import akka.stream._
-import akka.stream.scaladsl.{ BroadcastHub, Flow, MergeHub, Sink, Source }
+import akka.stream.scaladsl.{BroadcastHub, Flow, MergeHub, Sink, Source}
 import play.api.Logger
-import play.api.libs.json.{ Format, Json }
-import play.engineio.EngineIOController
 import play.api.libs.functional.syntax._
+import play.api.libs.json.{Format, Json}
+import play.engineio.EngineIOController
 import play.socketio.scaladsl.SocketIO
 
 /**
- * A chat event, either a message, a join room, or a leave room event.
- */
+  * A chat event, either a message, a join room, or a leave room event.
+  */
 sealed trait ChatEvent {
   def user: Option[User]
+
   def room: String
 }
 
 case class ChatMessage(
-  user: Option[User],
-  room: String,
-  message: String,
-  id: String) extends ChatEvent
+                        user: Option[User],
+                        room: String,
+                        message: String,
+                        id: String) extends ChatEvent
+
 object ChatMessage {
   implicit val format: Format[ChatMessage] = Json.format
 }
 
 case class JoinRoom(user: Option[User], room: String) extends ChatEvent
+
 object JoinRoom {
   implicit val format: Format[JoinRoom] = Json.format
 }
 
 case class LeaveRoom(user: Option[User], room: String) extends ChatEvent
+
 object LeaveRoom {
   implicit val format: Format[LeaveRoom] = Json.format
 }
 
 case class User(name: String)
+
 object User {
   // We're just encoding user as a simple string, not an object
   implicit val format: Format[User] = implicitly[Format[String]].inmap(User.apply, _.name)
 }
 
 object ChatProtocol {
+
   import play.socketio.scaladsl.SocketIOEventCodec._
 
   val decoder: SocketIOEventsDecoder[ChatEvent] = decodeByName {
-    case "chat message" => decodeJson[ChatMessage]
-    case "join room" => decodeJson[JoinRoom]
-    case "leave room" => decodeJson[LeaveRoom]
+    case "chat message" ⇒ decodeJson[ChatMessage]
+    case "join room" ⇒ decodeJson[JoinRoom]
+    case "leave room" ⇒ decodeJson[LeaveRoom]
   }
 
   val encoder: SocketIOEventsEncoder[ChatEvent] = encodeByType[ChatEvent] {
@@ -62,8 +68,8 @@ object ChatProtocol {
 }
 
 class ChatEngine(
-  socketIO: SocketIO,
-  system: ActorSystem)(implicit mat: Materializer) {
+                  socketIO: SocketIO,
+                  system: ActorSystem)(implicit mat: Materializer) {
 
   import ChatProtocol._
 
@@ -71,8 +77,8 @@ class ChatEngine(
 
   // This gets a chat room using Akka distributed pubsub
   private def getChatRoom(
-    user: User,
-    room: String): Flow[ChatEvent, ChatEvent, NotUsed] = {
+                           user: User,
+                           room: String): Flow[ChatEvent, ChatEvent, NotUsed] = {
 
     // Create a sink that sends all the messages to the chat room
     val sink = Sink.foreach[ChatEvent] { message =>
@@ -81,7 +87,7 @@ class ChatEngine(
 
     // Create a source that subscribes to messages from the chatroom
     val source = Source.actorRef[ChatEvent](16, OverflowStrategy.dropHead)
-      .mapMaterializedValue { ref =>
+      .mapMaterializedValue { ref ⇒
         mediator ! Subscribe(room, ref)
       }
 
@@ -103,7 +109,7 @@ class ChatEngine(
     var mergeSink: Sink[ChatEvent, NotUsed] = null
 
     Flow[ChatEvent] map {
-      case event @ JoinRoom(_, room) =>
+      case event@JoinRoom(_, room) =>
         val roomFlow = getChatRoom(user, room)
 
         // Add the room to our flow
@@ -123,7 +129,7 @@ class ChatEngine(
 
         event
 
-      case ChatMessage(_, room, message, id) =>
+      case ChatMessage(_, room, message, id) ⇒
         ChatMessage(
           user = Some(user),
           room = room,
@@ -135,7 +141,7 @@ class ChatEngine(
     } via {
       Flow.fromSinkAndSourceCoupledMat(
         sink = BroadcastHub.sink[ChatEvent],
-        source = MergeHub.source[ChatEvent]) { (source, sink) =>
+        source = MergeHub.source[ChatEvent]) { (source, sink) ⇒
         broadcastSource = source
         mergeSink = sink
         NotUsed
@@ -144,7 +150,7 @@ class ChatEngine(
   }
 
   val controller: EngineIOController = socketIO.builder
-    .onConnect { (request, sid) =>
+    .onConnect { (request, sid) ⇒
       Logger.info(s"Starting $sid session")
       // Extract the username from the header
       val username = request.getQueryString("user").getOrElse {
@@ -153,7 +159,7 @@ class ChatEngine(
       // And return the user, this will be the data for the session that we can read when we add a namespace
       User(username)
     }.addNamespace(decoder, encoder) {
-      case (session, chat) if chat.split('?').head == "/chat" => userChatFlow(session.data)
-    }
+    case (session, chat) if chat.split('?').head == "/chat" ⇒ userChatFlow(session.data)
+  }
     .createController()
 }

@@ -1,4 +1,7 @@
+import com.typesafe.sbt.SbtScalariform.ScalariformKeys
 import play.core.PlayVersion.{current => playVersion}
+
+import scalariform.formatter.preferences.{AlignParameters, AlignSingleLineCaseStatements, RewriteArrowSymbols, SpacesAroundMultiImports}
 
 name := "chat"
 organization := "lv"
@@ -6,7 +9,7 @@ version := "1.0"
 
 scalaVersion := "2.12.3"
 
-scalacOptions ++= Seq("-feature", "-Xfatal-warnings")
+scalacOptions ++= Seq("-feature", "-deprecation")
 scalacOptions in(Compile, doc) := Nil
 
 val AkkaVersion = "2.5.3"
@@ -35,14 +38,11 @@ libraryDependencies ++= Seq(
 
 fork in Test := true
 
-def formattingPreferences = {
-  import scalariform.formatter.preferences._
-  FormattingPreferences()
-    .setPreference(RewriteArrowSymbols, false)
-    .setPreference(AlignParameters, true)
-    .setPreference(AlignSingleLineCaseStatements, true)
-    .setPreference(SpacesAroundMultiImports, true)
-}
+scalariformPreferences := ScalariformKeys.preferences.value
+  .setPreference(RewriteArrowSymbols, false)
+  .setPreference(AlignParameters, true)
+  .setPreference(AlignSingleLineCaseStatements, true)
+  .setPreference(SpacesAroundMultiImports, true)
 
 enablePlugins(PlayScala)
 
