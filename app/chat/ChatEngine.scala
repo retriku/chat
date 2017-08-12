@@ -7,6 +7,7 @@ import akka.cluster.pubsub.DistributedPubSubMediator.{ Publish, Subscribe }
 import akka.stream._
 import akka.stream.scaladsl.{ BroadcastHub, Flow, MergeHub, Sink, Source }
 import chat.model._
+import chat.store.ChatRoomEvents
 import com.typesafe.scalalogging.LazyLogging
 import play.api.Logger
 import play.engineio.EngineIOController
@@ -20,23 +21,28 @@ class ChatEngine(
   import chat.model.ChatProtocol._
 
   val mediator: ActorRef = DistributedPubSub(system).mediator
+  val store: ActorRef = system.actorOf(ChatRoomEvents.props)
+
+  val storePublisher: Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = Flow.fromFunction { message ⇒
+    store ! message
+    message
+  }
 
   // This gets a chat room using Akka distributed pubsub
   private def getChatRoom(
     user: User,
     room: String): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
     // Create a sink that sends all the messages to the chat room
-    val sink =
-      Sink.foreach[ChatRoomEvent] { message ⇒
-        mediator ! Publish(room, message)
-      }
+    val sink = Sink.foreach[ChatRoomEvent] { message ⇒
+      mediator ! Publish(room, message)
+    }
 
     // Create a source that subscribes to messages from the chatroom
     val source = Source.actorRef[ChatRoomEvent](
       bufferSize = 16,
       overflowStrategy = OverflowStrategy.dropHead).mapMaterializedValue { ref ⇒
       mediator ! Subscribe(room, ref)
-    }
+    }.via(storePublisher)
 
     Flow.fromSinkAndSourceCoupled(
       sink =
@@ -61,9 +67,10 @@ class ChatEngine(
     Flow[ChatRoomEvent] map {
       case event @ JoinRoom(_, room) ⇒
         logger.debug(s"received: $event")
-        val roomFlow = getChatRoom(
-          user,
-          room)
+        val roomFlow =
+          getChatRoom(
+            user = user,
+            room = room)
 
         // Add the room to our flow
         broadcastSource // Ensure only messages for this room get there
