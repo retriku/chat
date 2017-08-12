@@ -131,8 +131,20 @@
     function render(room, user, message) {
       var li = $("<li>").append($("<div>").addClass("room").text(room));
       if (message) {
+        var edit = $("<button>").addClass("edit").text("Edit");
+        edit.click(function () {
+          socket.emit("update chat message",
+          {
+            room: room,
+            user: user,
+            message: message
+          });
+          return false;
+        });
+
         li.append($("<div>").addClass("user").text(user));
         li.append($("<div>").addClass(message.id).addClass("message").text(message.message));
+        li.append(edit)
       } else {
         li.append($("<div>").addClass("event").text(user));
       }

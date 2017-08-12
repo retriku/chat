@@ -1,14 +1,12 @@
 package chat
 
 import akka.NotUsed
-import akka.actor.{ ActorRef, ActorSystem, Props }
+import akka.actor.{ ActorRef, ActorSystem }
 import akka.cluster.pubsub.DistributedPubSub
 import akka.cluster.pubsub.DistributedPubSubMediator.{ Publish, Subscribe }
 import akka.stream._
-import akka.stream.actor.ActorSubscriber
 import akka.stream.scaladsl.{ BroadcastHub, Flow, MergeHub, Sink, Source }
 import chat.model._
-import chat.pubsub.ChatView
 import com.typesafe.scalalogging.LazyLogging
 import play.api.Logger
 import play.engineio.EngineIOController
@@ -22,9 +20,6 @@ class ChatEngine(
   import chat.model.ChatProtocol._
 
   val mediator: ActorRef = DistributedPubSub(system).mediator
-
-  val messagesView: ActorRef = system.actorOf(Props(new ChatView))
-  val messagesSink: Sink[NewChatMessage, NotUsed] = Sink.fromSubscriber(ActorSubscriber[NewChatMessage](messagesView))
 
   // This gets a chat room using Akka distributed pubsub
   private def getChatRoom(
