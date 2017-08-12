@@ -25,24 +25,28 @@ class ChatEngine(
   private def getChatRoom(
     user: User,
     room: String): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
-
     // Create a sink that sends all the messages to the chat room
-    val sink = Sink.foreach[ChatRoomEvent] { message =>
-      mediator ! Publish(room, message)
-    }
-
-    // Create a source that subscribes to messages from the chatroom
-    val source = Source.actorRef[ChatRoomEvent](16, OverflowStrategy.dropHead)
-      .mapMaterializedValue { ref ⇒
-        mediator ! Subscribe(room, ref)
+    val sink =
+      Sink.foreach[ChatRoomEvent] { message ⇒
+        mediator ! Publish(room, message)
       }
 
+    // Create a source that subscribes to messages from the chatroom
+    val source = Source.actorRef[ChatRoomEvent](
+      bufferSize = 16,
+      overflowStrategy = OverflowStrategy.dropHead).mapMaterializedValue { ref ⇒
+      mediator ! Subscribe(room, ref)
+    }
+
     Flow.fromSinkAndSourceCoupled(
-      sink = Flow[ChatRoomEvent]
-        // Add the join and leave room events
-        .prepend(Source.single(JoinRoom(Some(user), room)))
-        .concat(Source.single(LeaveRoom(Some(user), room)))
-        .to(sink),
+      sink =
+        Flow[ChatRoomEvent].prepend {
+          Source.single(JoinRoom(
+            user = Some(user),
+            room = room))
+        }.concat(Source.single(LeaveRoom(
+          user = Some(user),
+          room = room))).to(sink),
       source = source)
   }
 
@@ -57,39 +61,35 @@ class ChatEngine(
     Flow[ChatRoomEvent] map {
       case event @ JoinRoom(_, room) ⇒
         logger.debug(s"received: $event")
-        val roomFlow = getChatRoom(user, room)
+        val roomFlow = getChatRoom(
+          user,
+          room)
 
         // Add the room to our flow
-        broadcastSource
-          // Ensure only messages for this room get there
+        broadcastSource // Ensure only messages for this room get there
           // Also filter out JoinRoom messages, since there's a race condition as to whether it will
           // actually get here or not, so the room flow explicitly adds it.
-          .filter(e => e.room == room && !e.isInstanceOf[JoinRoom])
-          // Take until we get a leave room message.
-          .takeWhile(!_.isInstanceOf[LeaveRoom])
-          // And send it through the room flow
-          .via(roomFlow)
-          // Re-add the leave room here, since it was filtered out before
-          .concat(Source.single(LeaveRoom(Some(user), room)))
-          // And feed to the merge sink
+          .filter(e => e.room == room && !e.isInstanceOf[JoinRoom]) // Take until we get a leave room message.
+          .takeWhile(!_.isInstanceOf[LeaveRoom]) // And send it through the room flow
+          .via(roomFlow) // Re-add the leave room here, since it was filtered out before
+          .concat(Source.single(LeaveRoom(
+            Some(user),
+            room))) // And feed to the merge sink
           .runWith(mergeSink)
 
         event
-
       case msg @ NewChatMessage(room, _, message) ⇒
         logger.debug(s"received: $msg")
         NewChatMessage(
           user = Some(user),
           room = room,
           message = message)
-
       case msg @ UpdatedChatMessage(room, _, message) ⇒
         logger.debug(s"received: $msg")
         UpdatedChatMessage(
           user = Some(user),
           room = room,
-          message = message)
-
+          message = message.copy(message = s"updated: ${message.message}"))
       case other ⇒
         logger.debug(s"received: $other")
         other
@@ -97,7 +97,9 @@ class ChatEngine(
     } via {
       Flow.fromSinkAndSourceCoupledMat(
         sink = BroadcastHub.sink[ChatRoomEvent],
-        source = MergeHub.source[ChatRoomEvent]) { (source, sink) ⇒
+        source = MergeHub.source[ChatRoomEvent]) { (
+        source,
+        sink) ⇒
         broadcastSource = source
         mergeSink = sink
         NotUsed
@@ -105,17 +107,19 @@ class ChatEngine(
     }
   }
 
-  val controller: EngineIOController = socketIO.builder
-    .onConnect { (request, sid) ⇒
-      Logger.info(s"Starting $sid session")
-      // Extract the username from the header
-      val username = request.getQueryString("user").getOrElse {
-        throw new RuntimeException("No user parameter")
-      }
-      // And return the user, this will be the data for the session that we can read when we add a namespace
-      User(username)
-    }.addNamespace(decoder, encoder) {
-      case (session, chat) if chat.split('?').head == "/chat" ⇒
-        userChatFlow(session.data)
-    }.createController()
+  val controller: EngineIOController = socketIO.builder.onConnect { (
+    request,
+    sid) ⇒
+    Logger.info(s"Starting $sid session")
+    // Extract the username from the header
+    val username = request.getQueryString("user").getOrElse {
+      throw new RuntimeException("No user parameter")
+    }
+    // And return the user, this will be the data for the session that we can read when we add a namespace
+    User(username)
+  }.addNamespace(
+    decoder,
+    encoder) {
+    case (session, chat) if chat.split('?').head == "/chat" ⇒ userChatFlow(session.data)
+  }.createController()
 }
