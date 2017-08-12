@@ -1,98 +1,49 @@
 package chat
 
 import akka.NotUsed
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.{ ActorRef, ActorSystem, Props }
 import akka.cluster.pubsub.DistributedPubSub
-import akka.cluster.pubsub.DistributedPubSubMediator.{Publish, Subscribe}
+import akka.cluster.pubsub.DistributedPubSubMediator.{ Publish, Subscribe }
 import akka.stream._
-import akka.stream.scaladsl.{BroadcastHub, Flow, MergeHub, Sink, Source}
+import akka.stream.actor.ActorSubscriber
+import akka.stream.scaladsl.{ BroadcastHub, Flow, MergeHub, Sink, Source }
+import chat.model._
+import chat.pubsub.ChatView
+import com.typesafe.scalalogging.LazyLogging
 import play.api.Logger
-import play.api.libs.functional.syntax._
-import play.api.libs.json.{Format, Json}
 import play.engineio.EngineIOController
 import play.socketio.scaladsl.SocketIO
 
-/**
-  * A chat event, either a message, a join room, or a leave room event.
-  */
-sealed trait ChatEvent {
-  def user: Option[User]
-
-  def room: String
-}
-
-case class ChatMessage(
-                        user: Option[User],
-                        room: String,
-                        message: String,
-                        id: String) extends ChatEvent
-
-object ChatMessage {
-  implicit val format: Format[ChatMessage] = Json.format
-}
-
-case class JoinRoom(user: Option[User], room: String) extends ChatEvent
-
-object JoinRoom {
-  implicit val format: Format[JoinRoom] = Json.format
-}
-
-case class LeaveRoom(user: Option[User], room: String) extends ChatEvent
-
-object LeaveRoom {
-  implicit val format: Format[LeaveRoom] = Json.format
-}
-
-case class User(name: String)
-
-object User {
-  // We're just encoding user as a simple string, not an object
-  implicit val format: Format[User] = implicitly[Format[String]].inmap(User.apply, _.name)
-}
-
-object ChatProtocol {
-
-  import play.socketio.scaladsl.SocketIOEventCodec._
-
-  val decoder: SocketIOEventsDecoder[ChatEvent] = decodeByName {
-    case "chat message" ⇒ decodeJson[ChatMessage]
-    case "join room" ⇒ decodeJson[JoinRoom]
-    case "leave room" ⇒ decodeJson[LeaveRoom]
-  }
-
-  val encoder: SocketIOEventsEncoder[ChatEvent] = encodeByType[ChatEvent] {
-    case _: ChatMessage => "chat message" -> encodeJson[ChatMessage]
-    case _: JoinRoom => "join room" -> encodeJson[JoinRoom]
-    case _: LeaveRoom => "leave room" -> encodeJson[LeaveRoom]
-  }
-}
-
 class ChatEngine(
-                  socketIO: SocketIO,
-                  system: ActorSystem)(implicit mat: Materializer) {
+  socketIO: SocketIO,
+  system:   ActorSystem)(implicit mat: Materializer)
+  extends LazyLogging {
 
-  import ChatProtocol._
+  import chat.model.ChatProtocol._
 
   val mediator: ActorRef = DistributedPubSub(system).mediator
 
+  val messagesView: ActorRef = system.actorOf(Props(new ChatView))
+  val messagesSink: Sink[NewChatMessage, NotUsed] = Sink.fromSubscriber(ActorSubscriber[NewChatMessage](messagesView))
+
   // This gets a chat room using Akka distributed pubsub
   private def getChatRoom(
-                           user: User,
-                           room: String): Flow[ChatEvent, ChatEvent, NotUsed] = {
+    user: User,
+    room: String): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
 
     // Create a sink that sends all the messages to the chat room
-    val sink = Sink.foreach[ChatEvent] { message =>
+    val sink = Sink.foreach[ChatRoomEvent] { message =>
       mediator ! Publish(room, message)
     }
 
     // Create a source that subscribes to messages from the chatroom
-    val source = Source.actorRef[ChatEvent](16, OverflowStrategy.dropHead)
+    val source = Source.actorRef[ChatRoomEvent](16, OverflowStrategy.dropHead)
       .mapMaterializedValue { ref ⇒
         mediator ! Subscribe(room, ref)
       }
 
     Flow.fromSinkAndSourceCoupled(
-      sink = Flow[ChatEvent]
+      sink = Flow[ChatRoomEvent]
         // Add the join and leave room events
         .prepend(Source.single(JoinRoom(Some(user), room)))
         .concat(Source.single(LeaveRoom(Some(user), room)))
@@ -101,15 +52,16 @@ class ChatEngine(
   }
 
   // Creates a chat flow for a user session
-  def userChatFlow(user: User): Flow[ChatEvent, ChatEvent, NotUsed] = {
+  def userChatFlow(user: User): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
 
     // broadcast source and sink for demux/muxing multiple chat rooms in this one flow
     // They'll be provided later when we materialize the flow
-    var broadcastSource: Source[ChatEvent, NotUsed] = null
-    var mergeSink: Sink[ChatEvent, NotUsed] = null
+    var broadcastSource: Source[ChatRoomEvent, NotUsed] = null
+    var mergeSink: Sink[ChatRoomEvent, NotUsed] = null
 
-    Flow[ChatEvent] map {
-      case event@JoinRoom(_, room) =>
+    Flow[ChatRoomEvent] map {
+      case event @ JoinRoom(_, room) ⇒
+        logger.debug(s"received: $event")
         val roomFlow = getChatRoom(user, room)
 
         // Add the room to our flow
@@ -129,19 +81,28 @@ class ChatEngine(
 
         event
 
-      case ChatMessage(_, room, message, id) ⇒
-        ChatMessage(
+      case msg @ NewChatMessage(room, _, message) ⇒
+        logger.debug(s"received: $msg")
+        NewChatMessage(
           user = Some(user),
           room = room,
-          message = message,
-          id = id)
+          message = message)
 
-      case other => other
+      case msg @ UpdatedChatMessage(room, _, message) ⇒
+        logger.debug(s"received: $msg")
+        UpdatedChatMessage(
+          user = Some(user),
+          room = room,
+          message = message)
+
+      case other ⇒
+        logger.debug(s"received: $other")
+        other
 
     } via {
       Flow.fromSinkAndSourceCoupledMat(
-        sink = BroadcastHub.sink[ChatEvent],
-        source = MergeHub.source[ChatEvent]) { (source, sink) ⇒
+        sink = BroadcastHub.sink[ChatRoomEvent],
+        source = MergeHub.source[ChatRoomEvent]) { (source, sink) ⇒
         broadcastSource = source
         mergeSink = sink
         NotUsed
@@ -159,7 +120,7 @@ class ChatEngine(
       // And return the user, this will be the data for the session that we can read when we add a namespace
       User(username)
     }.addNamespace(decoder, encoder) {
-    case (session, chat) if chat.split('?').head == "/chat" ⇒ userChatFlow(session.data)
-  }
-    .createController()
+      case (session, chat) if chat.split('?').head == "/chat" ⇒
+        userChatFlow(session.data)
+    }.createController()
 }

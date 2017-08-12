@@ -26,6 +26,7 @@
 
   <logger name="play" level="INFO" />
   <logger name="application" level="DEBUG" />
+  <logger name="chat" level="DEBUG" />
   <!-- Set to debug so that we can see the requests going to different nodes -->
   <logger name="play.engineio.EngineIOController" level="DEBUG" />
 

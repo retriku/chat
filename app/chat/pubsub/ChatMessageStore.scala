@@ -1,44 +1,34 @@
 package chat.pubsub
 
-import akka.stream.actor.ActorPublisher
-import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
-import chat.ChatMessage
+import akka.actor.Props
+import akka.persistence.PersistentActor
+import chat.model._
 
 class ChatMessageStore
-  extends ActorPublisher[ChatMessage] {
+  extends PersistentActor {
 
-  import ChatMessageStore._
+  var state: List[ChatMessage] = Nil
 
-  override def receive: Receive = withMessages(Nil)
-
-  private def withMessages(messages: List[ChatMessage]): Receive = {
-    case AddChatMessage(message) ⇒
-      val newMessages = message :: messages
-
-      context.become(withMessages(newMessages))
-      sender() ! MessageAdded(message)
-      deliverEvents(newMessages)
-    case Request(_) ⇒
-      deliverEvents(messages)
-    case Cancel ⇒
-      context.stop(self)
+  override def receiveRecover: Receive = {
+    case e: ChatEvent =>
+      updateState()(e)
   }
 
-  private def deliverEvents(messages: List[ChatMessage]): Unit = {
-    if (isActive && totalDemand > 0) {
-      val (use, keep) = messages.splitAt(totalDemand.toInt)
-
-      context.become(withMessages(keep))
-
-      use foreach onNext
-    }
+  private def updateState(): PartialFunction[ChatEvent, Unit] = {
+    case NewChatMessage(_, room, message) ⇒
+      state = message :: state
   }
+
+  override def receiveCommand: Receive = {
+    case msg: NewChatMessage ⇒
+      persist(msg)(updateState())
+    case msg: UpdatedChatMessage ⇒
+      persist(msg)(updateState())
+  }
+
+  override def persistenceId: String = s"${self.path.name}"
 }
 
 object ChatMessageStore {
-
-  case class AddChatMessage(chatMessage: ChatMessage)
-
-  case class MessageAdded(chatMessage: ChatMessage)
-
+  def props = Props(new ChatMessageStore)
 }
