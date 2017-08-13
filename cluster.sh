@@ -6,10 +6,11 @@ wd=`pwd`
 startNode() {
   node=$1
   ./target/universal/stage/bin/chat \
-    -jvm-debug 9999 \
     -Dhttp.port=900$node -Dakka.remote.netty.tcp.port=255$node \
     -Dpidfile.path=$wd/target/node$node.pid \
     -Dnode.id=$node \
+    -Dakka.cluster.seed-nodes.1=akka.tcp://application@127.0.0.1:2552 \
+    -Dakka.cluster.seed-nodes.2=akka.tcp://application@127.0.0.1:2553 \
     &
 }
 
@@ -27,8 +28,8 @@ stopNode() {
 
 stop() {
     stopNode 1
-#    stopNode 2
-#    stopNode 3
+    stopNode 2
+    stopNode 3
 
     if [ -e target/nginx.pid ]
     then
@@ -42,8 +43,8 @@ start() {
     sbt clean stage
 
     startNode 1
-#    startNode 2
-#    startNode 3
+    startNode 2
+    startNode 3
 
     nginx -p $wd -c nginx.conf &
 }

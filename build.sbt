@@ -19,6 +19,7 @@ libraryDependencies ++= Seq(
 
   "org.iq80.leveldb" % "leveldb" % "0.7",
   "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8",
+  "com.github.dnvriend" %% "akka-persistence-inmemory" % "2.5.1.1",
 
   // Production dependencies
   "com.typesafe.play" %% "play" % playVersion withSources() withJavadoc(),
@@ -45,3 +46,4 @@ fork in Test := true
 
 enablePlugins(PlayScala)
 
+resolvers += Resolver.jcenterRepo
