@@ -1,6 +1,7 @@
 package modules
 
 import _root_.controllers.AssetsComponents
+import akka.actor.ActorSystem
 import chat.ChatEngine
 import com.softwaremill.macwire._
 import play.api._
@@ -8,7 +9,8 @@ import play.engineio.EngineIOController
 import play.socketio.scaladsl.SocketIOComponents
 import router.Routes
 
-class MyApplicationLoader extends ApplicationLoader {
+class MyApplicationLoader
+  extends ApplicationLoader {
   override def load(context: ApplicationLoader.Context): Application =
     new BuiltInComponentsFromContext(context) with MyApplication with NoHttpFiltersComponents {
       LoggerConfigurator.apply(context.environment.classLoader)
@@ -16,10 +18,12 @@ class MyApplicationLoader extends ApplicationLoader {
     }.application
 }
 
-trait MyApplication extends BuiltInComponents
-  with AssetsComponents
-  with SocketIOComponents {
+trait MyApplication
+  extends BuiltInComponents
+    with AssetsComponents
+    with SocketIOComponents {
 
+  private implicit val _: ActorSystem = actorSystem
   lazy val chatEngine: ChatEngine = wire[ChatEngine]
   lazy val engineIOController: EngineIOController = chatEngine.controller
 

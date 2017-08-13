@@ -1,8 +1,13 @@
 package chat.store
 
-import akka.actor.{ ExtendedActorSystem, Props }
+import akka.NotUsed
+import akka.actor.{ActorRef, ActorSystem, ExtendedActorSystem, Props}
 import akka.persistence.PersistentActor
-import akka.persistence.journal.{ Tagged, WriteEventAdapter }
+import akka.persistence.journal.{Tagged, WriteEventAdapter}
+import akka.persistence.query.journal.leveldb.scaladsl.LeveldbReadJournal
+import akka.persistence.query.{NoOffset, PersistenceQuery}
+import akka.stream.Materializer
+import akka.stream.scaladsl.{Flow, Source}
 import chat.model._
 
 private[store] class ChatRoomEvents
@@ -36,6 +41,25 @@ private[store] class ChatRoomEvents
 
 object ChatRoomEvents {
   def props = Props(new ChatRoomEvents)
+
+  def persistenceFlow(implicit system: ActorSystem): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
+    val store: ActorRef = system.actorOf(ChatRoomEvents.props)
+    Flow.fromFunction { message ⇒
+      store ! message
+      message
+    }
+  }
+
+  def chatRoomEventSource(tag: String)
+                         (implicit system: ActorSystem,
+                          mat: Materializer): Source[ChatRoomEvent, NotUsed] = {
+    val persistenceQuery = PersistenceQuery(system)
+      .readJournalFor[LeveldbReadJournal](LeveldbReadJournal.Identifier)
+
+    persistenceQuery.currentEventsByTag(tag, NoOffset)
+      .map(_.event.asInstanceOf[ChatRoomEvent])
+  }
+
 }
 
 class ChatRoomEventsEventAdapter(system: ExtendedActorSystem)
