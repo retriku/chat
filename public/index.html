@@ -153,6 +153,7 @@
     }
 
     function renderUpdate(room, user, message) {
+      console.log("message:" + JSON.stringify(message))
       $("." + message.id).text(message.message);
     }
 

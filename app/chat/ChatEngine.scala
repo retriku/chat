@@ -60,16 +60,13 @@ class ChatEngine(socketIO: SocketIO)
     Flow[ChatRoomEvent] map {
       case event@JoinRoom(_, room) ⇒
         logger.debug(s"received: $event")
-        val roomFlow =
+        val chatRoomEvents: Source[ChatRoomEvent, NotUsed] =
+          ChatRoomEvents.chatRoomEventSource(room, user)
+        val roomFlow: Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] =
           getChatRoom(
             user = user,
-            room = room)
-            .merge {
-              ChatRoomEvents.chatRoomEventSource(room).map { ev ⇒
-                logger.debug(s"event: $ev")
-                ev
-              }
-            }
+            room = room
+          )
 
         // Add the room to our flow
         broadcastSource // Ensure only messages for this room get there
@@ -77,10 +74,11 @@ class ChatEngine(socketIO: SocketIO)
           // actually get here or not, so the room flow explicitly adds it.
           .filter(e => e.room == room && !e.isInstanceOf[JoinRoom]) // Take until we get a leave room message.
           .takeWhile(!_.isInstanceOf[LeaveRoom]) // And send it through the room flow
+          .concat(chatRoomEvents)
           .via(roomFlow) // Re-add the leave room here, since it was filtered out before
           .concat(Source.single(LeaveRoom(
-          Some(user),
-          room))) // And feed to the merge sink
+            user = Some(user),
+            room = room))) // And feed to the merge sink
           .runWith(mergeSink)
 
         event

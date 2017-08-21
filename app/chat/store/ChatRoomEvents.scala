@@ -9,12 +9,15 @@ import akka.persistence.query.{NoOffset, PersistenceQuery}
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Flow, Source}
 import chat.model._
+import com.typesafe.scalalogging.LazyLogging
 
 private[store] class ChatRoomEvents
-  extends PersistentActor {
+  extends PersistentActor
+    with LazyLogging {
 
   case class State(chatRoomEvents: Map[String, ChatRoomEvent] = Map.empty) {
     def updated(event: ChatRoomEvent): State = {
+      logger.debug(s"update for: $event")
       copy(chatRoomEvents = chatRoomEvents.updated(event.room, event))
     }
   }
@@ -50,14 +53,19 @@ object ChatRoomEvents {
     }
   }
 
-  def chatRoomEventSource(tag: String)
+  def chatRoomEventSource(room: String,
+                          user: User)
                          (implicit system: ActorSystem,
                           mat: Materializer): Source[ChatRoomEvent, NotUsed] = {
     val persistenceQuery = PersistenceQuery(system)
       .readJournalFor[InMemoryReadJournal](InMemoryReadJournal.Identifier)
 
-    persistenceQuery.currentEventsByTag(tag, NoOffset)
-      .map(_.event.asInstanceOf[ChatRoomEvent])
+    persistenceQuery.currentEventsByTag(
+      tag = room,
+      offset = NoOffset
+    ).map {
+      _.event.asInstanceOf[ChatRoomEvent]
+    }.filterNot(_.user.contains(user))
   }
 
 }

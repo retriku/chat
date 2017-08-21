@@ -6,7 +6,8 @@ wd=`pwd`
 startNode() {
   node=$1
   ./target/universal/stage/bin/chat \
-    -Dhttp.port=900$node -Dakka.remote.netty.tcp.port=255$node \
+    -Dhttp.port=900$node \
+    -Dakka.remote.netty.tcp.port=255$node \
     -Dpidfile.path=$wd/target/node$node.pid \
     -Dnode.id=$node \
     -Dakka.cluster.seed-nodes.1=akka.tcp://application@127.0.0.1:2552 \
