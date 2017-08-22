@@ -42,8 +42,7 @@ object CoinChangeImpl
 
     require(results.size == expectedTotal)
 
-    results.filterNot(_.isEmpty).filter(amountMatches(expectedTotal)).sortBy(
-      _.map(_.coinCount).sum).headOption
+    results.filterNot(_.isEmpty).lastOption
   }
 
   private def findAllMatches(denominations: Set[Int]): (List[Set[Result]], Int) ⇒ List[Set[Result]] = {
@@ -65,14 +64,9 @@ object CoinChangeImpl
         val j = if (i % 2 == 0) i / 2 else (i / 2) + 1
         val intervalStart = soFar.take(j)
         val intervalEnd = soFar.slice(i / 2, i).reverse
-        val coinChanges = intervalStart.zip(intervalEnd).map {
-          case (coinChanges1, coinChanges2) ⇒
-            val normal = mergeAndNormalize(
-              coinChanges1 = coinChanges1,
-              coinChanges2 = coinChanges2)
-            normal
-        }.filter(amountMatches(amount)).sortBy(
-          _.map(_.coinCount).sum).headOption.toList
+        val coinChanges = intervalStart.zip(intervalEnd).map(mergeAndNormalize).filter(amountMatches(amount)).sortBy {
+          _.map(_.coinCount).sum
+        }.headOption.toList
         val currentMin = soFar(i).map(_.coinCount).sum
         val newMin = coinChanges.map(_.map(_.coinCount).sum)
 
@@ -99,15 +93,15 @@ object CoinChangeImpl
     (newMin.exists(currentMin > _) || currentMin == 0) && coinChanges.nonEmpty
   }
 
-  def mergeAndNormalize(coinChanges1: Set[Result],
-                        coinChanges2: Set[Result]): Set[Result] = {
-    coinChanges1.flatMap { r1 ⇒
-      coinChanges2.find(_.denomination == r1.denomination).map { r2 ⇒
-        Set(r1.copy(coinCount = r1.coinCount + r2.coinCount))
-      }.getOrElse {
-        coinChanges2 + r1
+  def mergeAndNormalize: PartialFunction[(Set[Result], Set[Result]), Set[Result]] = {
+    case (coinChanges1, coinChanges2) ⇒
+      coinChanges1.flatMap { r1 ⇒
+        coinChanges2.find(_.denomination == r1.denomination).map { r2 ⇒
+          Set(r1.copy(coinCount = r1.coinCount + r2.coinCount))
+        }.getOrElse {
+          coinChanges2 + r1
+        }
       }
-    }
   }
 
   val r1 = change(Set(1, 2, 5, 10, 20, 50, 100, 200, 500))(173)
