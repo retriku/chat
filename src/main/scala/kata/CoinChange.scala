@@ -34,7 +34,17 @@ object CoinChangeImpl
     */
   override def change(denominations: Set[Int])
                      (expectedTotal: Int): Option[Set[Result]] = {
-    val initialCoinChanges: List[Set[Result]] = (0 until expectedTotal).map(_ ⇒ Set.empty[Result]).toList
+    val initialCoinChanges: List[Set[Result]] = (0 until expectedTotal).map { i ⇒
+      val amount = i + 1
+      if (denominations.exists(amount % _ == 0)) {
+        val denomination = denominations.filter(amount % _ == 0).max
+        Set(Result(
+          denomination = denomination,
+          coinCount = amount / denomination))
+      } else {
+        Set.empty[Result]
+      }
+    }.toList
 
     val results = (0 until expectedTotal).foldLeft(initialCoinChanges) {
       findAllMatches(denominations)
@@ -48,37 +58,22 @@ object CoinChangeImpl
   private def findAllMatches(denominations: Set[Int]): (List[Set[Result]], Int) ⇒ List[Set[Result]] = {
     case (soFar, i) ⇒
       val amount = i + 1
-      if (denominations.contains(amount)) {
-        soFar.take(i) ::: List(Set(
-          Result(
-            denomination = amount,
-            coinCount = 1))) ::: soFar.drop(i + 1)
-      } else if (denominations.filter(1 < _).exists(amount % _ == 0)) {
-        val denomination = denominations.filter(1 < _).filter(amount % _ == 0).max
-        soFar.take(i) ::: List(
-          Set(Result(
-            denomination = denomination,
-            coinCount = amount / denomination))
-        ) ::: soFar.drop(i + 1)
-      } else {
-        val j = if (i % 2 == 0) i / 2 else (i / 2) + 1
-        val intervalStart = soFar.take(j)
-        val intervalEnd = soFar.slice(i / 2, i).reverse
-        val coinChanges = intervalStart.zip(intervalEnd).map(mergeAndNormalize).filter(amountMatches(amount)).sortBy {
-          _.map(_.coinCount).sum
-        }.headOption.toList
-        val currentMin = soFar(i).map(_.coinCount).sum
-        val newMin = coinChanges.map(_.map(_.coinCount).sum)
+      val j = if (i % 2 == 0) i / 2 else (i / 2) + 1
+      val intervalStart = soFar.take(j)
+      val intervalEnd = soFar.slice(i / 2, i).reverse
+      val coinChanges = intervalStart.zip(intervalEnd).map(mergeAndNormalize).filter(amountMatches(amount)).sortBy {
+        _.toList.map(_.coinCount).sum
+      }.headOption.toList
+      val currentMin = soFar(i).map(_.coinCount).sum
+      val newMin = coinChanges.map(_.toList.map(_.coinCount).sum)
 
-        if (elementUpdateNeeded(
-          coinChanges = coinChanges,
-          currentMin = currentMin,
-          newMin = newMin)) {
-          soFar.take(i) ::: coinChanges ::: soFar.drop(i + 1)
-        }
-        else {
-          soFar
-        }
+      if (elementUpdateNeeded(
+        currentMin = currentMin,
+        newMin = newMin)) {
+        soFar.take(i) ::: coinChanges ::: soFar.drop(i + 1)
+      }
+      else {
+        soFar
       }
   }
 
@@ -87,10 +82,9 @@ object CoinChangeImpl
       coinChanges.map(d ⇒ d.coinCount * d.denomination).sum == amount
   }
 
-  private def elementUpdateNeeded(coinChanges: List[Set[Result]],
-                                  currentMin: Int,
+  private def elementUpdateNeeded(currentMin: Int,
                                   newMin: List[Int]) = {
-    (newMin.exists(currentMin > _) || currentMin == 0) && coinChanges.nonEmpty
+    newMin.nonEmpty && (newMin.exists(currentMin > _) || currentMin == 0)
   }
 
   def mergeAndNormalize: PartialFunction[(Set[Result], Set[Result]), Set[Result]] = {
@@ -115,4 +109,5 @@ object CoinChangeImpl
   require(change(Set())(5).isEmpty)
   require(change(Set())(0).isEmpty)
   require(change(Set(1, 2))(0).isEmpty)
+  //  require(change(Set(1))(100000) contains Set(Result(1, 100000)))
 }
