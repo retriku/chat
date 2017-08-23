@@ -34,7 +34,7 @@ object CoinChangeImpl
     */
   override def change(denominations: Set[Int])
                      (expectedTotal: Int): Option[Set[Result]] = {
-    val initialCoinChanges: List[Set[Result]] = (0 until expectedTotal).map { i ⇒
+    val initialCoinChanges: Array[Set[Result]] = (0 until expectedTotal).map { i ⇒
       val amount = i + 1
       if (denominations.exists(amount % _ == 0)) {
         val denomination = denominations.filter(amount % _ == 0).max
@@ -44,18 +44,18 @@ object CoinChangeImpl
       } else {
         Set.empty[Result]
       }
-    }.toList
+    }.toArray
 
     val results = (0 until expectedTotal).foldLeft(initialCoinChanges) {
       findAllMatches(denominations)
     }
 
-    require(results.size == expectedTotal)
+    require(results.length == expectedTotal)
 
     results.filterNot(_.isEmpty).lastOption
   }
 
-  private def findAllMatches(denominations: Set[Int]): (List[Set[Result]], Int) ⇒ List[Set[Result]] = {
+  private def findAllMatches(denominations: Set[Int]): (Array[Set[Result]], Int) ⇒ Array[Set[Result]] = {
     case (soFar, i) ⇒
       val amount = i + 1
       val j = if (i % 2 == 0) i / 2 else (i / 2) + 1
@@ -63,17 +63,21 @@ object CoinChangeImpl
       val intervalEnd = soFar.slice(i / 2, i).reverse
       val coinChanges = intervalStart.zip(intervalEnd).map(mergeAndNormalize).filter(amountMatches(amount)).sortBy {
         _.toList.map(_.coinCount).sum
-      }.headOption.toList
-      val currentMin = soFar(i).map(_.coinCount).sum
-      val newMin = coinChanges.map(_.toList.map(_.coinCount).sum)
+      }.headOption
 
-      if (elementUpdateNeeded(
-        currentMin = currentMin,
-        newMin = newMin)) {
-        soFar.take(i) ::: coinChanges ::: soFar.drop(i + 1)
-      } else {
-        soFar
-      }
+      coinChanges.map{ cc ⇒
+        val currentMin = soFar(i).toList.map(_.coinCount).sum
+        val newMin = cc.toList.map(_.coinCount).sum
+
+        if (elementUpdateNeeded(
+          currentMin = currentMin,
+          newMin = newMin)) {
+          soFar(i) = cc
+          soFar
+        } else {
+          soFar
+        }
+      }.getOrElse(soFar)
   }
 
   private def amountMatches(amount: Int): PartialFunction[Set[Result], Boolean] = {
@@ -82,8 +86,8 @@ object CoinChangeImpl
   }
 
   private def elementUpdateNeeded(currentMin: Int,
-                                  newMin: List[Int]) = {
-    newMin.nonEmpty && (newMin.exists(currentMin > _) || currentMin == 0)
+                                  newMin: Int) = {
+    newMin < currentMin || currentMin == 0
   }
 
   def mergeAndNormalize: PartialFunction[(Set[Result], Set[Result]), Set[Result]] = {
