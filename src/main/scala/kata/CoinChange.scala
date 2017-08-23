@@ -71,8 +71,7 @@ object CoinChangeImpl
         currentMin = currentMin,
         newMin = newMin)) {
         soFar.take(i) ::: coinChanges ::: soFar.drop(i + 1)
-      }
-      else {
+      } else {
         soFar
       }
   }
@@ -98,6 +97,7 @@ object CoinChangeImpl
       }
   }
 
+  val s = System.currentTimeMillis()
   val r1 = change(Set(1, 2, 5, 10, 20, 50, 100, 200, 500))(173)
   require(
     r1.map(_.toList.sortBy(_.denomination)) contains List(Result(1, 1), Result(2, 1), Result(20, 1), Result(50, 1),
@@ -109,5 +109,9 @@ object CoinChangeImpl
   require(change(Set())(5).isEmpty)
   require(change(Set())(0).isEmpty)
   require(change(Set(1, 2))(0).isEmpty)
-  //  require(change(Set(1))(100000) contains Set(Result(1, 100000)))
+  require(change(Set(1))(20000) contains Set(Result(1, 20000)))
+
+  val e = System.currentTimeMillis()
+  val sec = (e - s) / 1000
+  println(s"elapsed: ${sec / 60}:${sec % 60}.${(e - s) % 1000}")
 }
