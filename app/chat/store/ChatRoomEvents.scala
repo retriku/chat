@@ -25,7 +25,7 @@ private[store] class ChatRoomEvents
   var state = State()
 
   override def receiveRecover: Receive = {
-    case e: ChatEvent =>
+    case e: ChatEvent ⇒
       updateState()(e)
   }
 
@@ -53,8 +53,7 @@ object ChatRoomEvents {
     }
   }
 
-  def chatRoomEventSource(room: String,
-                          user: User)
+  def chatRoomEventSource(room: String)
                          (implicit system: ActorSystem,
                           mat: Materializer): Source[ChatRoomEvent, NotUsed] = {
     val persistenceQuery = PersistenceQuery(system)
@@ -65,7 +64,7 @@ object ChatRoomEvents {
       offset = NoOffset
     ).map {
       _.event.asInstanceOf[ChatRoomEvent]
-    }.filterNot(_.user.contains(user))
+    }
   }
 
 }

@@ -1,9 +1,7 @@
 package chat
 
 import akka.NotUsed
-import akka.actor.{ActorRef, ActorSystem}
-import akka.cluster.pubsub.DistributedPubSub
-import akka.cluster.pubsub.DistributedPubSubMediator.{Publish, Subscribe}
+import akka.actor.ActorSystem
 import akka.stream._
 import akka.stream.scaladsl.{BroadcastHub, Flow, MergeHub, Sink, Source}
 import chat.model._
@@ -20,22 +18,17 @@ class ChatEngine(socketIO: SocketIO)
 
   import chat.model.ChatProtocol._
 
-  val mediator: ActorRef = DistributedPubSub(system).mediator
+  var chatRooms =
+    Map.empty[String, (Source[ChatRoomEvent, Sink[ChatRoomEvent, NotUsed]], Sink[ChatRoomEvent, Source[ChatRoomEvent, NotUsed]])]
 
   // This gets a chat room using Akka distributed pubsub
   private def getChatRoom(user: User,
                           room: String): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
-    // Create a sink that sends all the messages to the chat room
-    val sink = Sink.foreach[ChatRoomEvent] { message ⇒
-      mediator ! Publish(room, message)
-    }
-
-    // Create a source that subscribes to messages from the chatroom
-    val source = Source.actorRef[ChatRoomEvent](
-      bufferSize = 16,
-      overflowStrategy = OverflowStrategy.dropHead).mapMaterializedValue { ref ⇒
-      mediator ! Subscribe(room, ref)
-    }.via(ChatRoomEvents.persistenceFlow)
+    val (source, sink) = chatRooms.getOrElse(room, {
+      val p = (MergeHub.source[ChatRoomEvent], BroadcastHub.sink[ChatRoomEvent])
+      chatRooms += room -> p
+      p
+    })
 
     Flow.fromSinkAndSourceCoupled(
       sink =
@@ -51,17 +44,15 @@ class ChatEngine(socketIO: SocketIO)
 
   // Creates a chat flow for a user session
   def userChatFlow(user: User): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
-
-    // broadcast source and sink for demux/muxing multiple chat rooms in this one flow
-    // They'll be provided later when we materialize the flow
-    var broadcastSource: Source[ChatRoomEvent, NotUsed] = null
-    var mergeSink: Sink[ChatRoomEvent, NotUsed] = null
+    logger.debug(s"for user: $user")
+    var broadcastSource: Source[ChatRoomEvent, NotUsed] = _
+    var mergeSink: Sink[ChatRoomEvent, NotUsed] = _
 
     Flow[ChatRoomEvent] map {
       case event@JoinRoom(_, room) ⇒
         logger.debug(s"received: $event")
         val chatRoomEvents: Source[ChatRoomEvent, NotUsed] =
-          ChatRoomEvents.chatRoomEventSource(room, user)
+          ChatRoomEvents.chatRoomEventSource(room)
         val roomFlow: Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] =
           getChatRoom(
             user = user,
@@ -77,8 +68,8 @@ class ChatEngine(socketIO: SocketIO)
           .concat(chatRoomEvents)
           .via(roomFlow) // Re-add the leave room here, since it was filtered out before
           .concat(Source.single(LeaveRoom(
-            user = Some(user),
-            room = room))) // And feed to the merge sink
+          user = Some(user),
+          room = room))) // And feed to the merge sink
           .runWith(mergeSink)
 
         event
