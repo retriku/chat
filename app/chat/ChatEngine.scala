@@ -3,7 +3,7 @@ package chat
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream._
-import akka.stream.scaladsl.{BroadcastHub, Flow, MergeHub, Sink, Source}
+import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, Sink, Source}
 import chat.model._
 import chat.store.ChatRoomEvents
 import com.typesafe.scalalogging.LazyLogging
@@ -19,14 +19,13 @@ class ChatEngine(socketIO: SocketIO)
   import chat.model.ChatProtocol._
 
   var chatRooms =
-    Map.empty[String, (Source[ChatRoomEvent, Sink[ChatRoomEvent, NotUsed]], Sink[ChatRoomEvent, Source[ChatRoomEvent, NotUsed]])]
+    Map.empty[String, (Sink[ChatRoomEvent, NotUsed], Source[ChatRoomEvent, NotUsed])]
 
-  // This gets a chat room using Akka distributed pubsub
   private def getChatRoom(user: User,
                           room: String): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
-    val (source, sink) = chatRooms.getOrElse(room, {
-      val p = (MergeHub.source[ChatRoomEvent], BroadcastHub.sink[ChatRoomEvent])
-      chatRooms += room -> p
+    val (sink, source) = chatRooms.getOrElse(room, {
+      val p = MergeHub.source[ChatRoomEvent].toMat(BroadcastHub.sink[ChatRoomEvent])(Keep.both).run
+      chatRooms += room → p
       p
     })
 
@@ -45,8 +44,8 @@ class ChatEngine(socketIO: SocketIO)
   // Creates a chat flow for a user session
   def userChatFlow(user: User): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
     logger.debug(s"for user: $user")
-    var broadcastSource: Source[ChatRoomEvent, NotUsed] = _
-    var mergeSink: Sink[ChatRoomEvent, NotUsed] = _
+    var broadcastSource: Source[ChatRoomEvent, NotUsed] = null
+    var mergeSink: Sink[ChatRoomEvent, NotUsed] = null
 
     Flow[ChatRoomEvent] map {
       case event@JoinRoom(_, room) ⇒
@@ -63,7 +62,7 @@ class ChatEngine(socketIO: SocketIO)
         broadcastSource // Ensure only messages for this room get there
           // Also filter out JoinRoom messages, since there's a race condition as to whether it will
           // actually get here or not, so the room flow explicitly adds it.
-          .filter(e => e.room == room && !e.isInstanceOf[JoinRoom]) // Take until we get a leave room message.
+          .filter(e ⇒ e.room == room && !e.isInstanceOf[JoinRoom]) // Take until we get a leave room message.
           .takeWhile(!_.isInstanceOf[LeaveRoom]) // And send it through the room flow
           .concat(chatRoomEvents)
           .via(roomFlow) // Re-add the leave room here, since it was filtered out before
