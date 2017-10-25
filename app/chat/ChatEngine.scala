@@ -34,7 +34,7 @@ class ChatEngine(socketIO: SocketIO)
         Flow[ChatRoomEvent].prepend {
           Source.single(JoinRoom(
             user = Some(user),
-            room = room))
+            room = room)).concat(ChatRoomEvents.chatRoomEventSource(room))
         }.concat(Source.single(LeaveRoom(
           user = Some(user),
           room = room))).to(sink),
@@ -50,25 +50,20 @@ class ChatEngine(socketIO: SocketIO)
     Flow[ChatRoomEvent] map {
       case event@JoinRoom(_, room) ⇒
         logger.debug(s"received: $event")
-        val chatRoomEvents: Source[ChatRoomEvent, NotUsed] =
-          ChatRoomEvents.chatRoomEventSource(room)
+
         val roomFlow: Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] =
           getChatRoom(
             user = user,
             room = room
           )
 
-        // Add the room to our flow
-        broadcastSource // Ensure only messages for this room get there
-          // Also filter out JoinRoom messages, since there's a race condition as to whether it will
-          // actually get here or not, so the room flow explicitly adds it.
-          .filter(e ⇒ e.room == room && !e.isInstanceOf[JoinRoom]) // Take until we get a leave room message.
-          .takeWhile(!_.isInstanceOf[LeaveRoom]) // And send it through the room flow
-          .concat(chatRoomEvents)
-          .via(roomFlow) // Re-add the leave room here, since it was filtered out before
+        broadcastSource
+          .filter(e ⇒ e.room == room && !e.isInstanceOf[JoinRoom])
+          .takeWhile(!_.isInstanceOf[LeaveRoom])
+          .via(roomFlow)
           .concat(Source.single(LeaveRoom(
-          user = Some(user),
-          room = room))) // And feed to the merge sink
+            user = Some(user),
+            room = room)))
           .runWith(mergeSink)
 
         event
@@ -88,6 +83,8 @@ class ChatEngine(socketIO: SocketIO)
         logger.debug(s"received: $other")
         other
 
+    } via {
+      ChatRoomEvents.persistenceFlow
     } via {
       Flow.fromSinkAndSourceCoupledMat(
         sink = BroadcastHub.sink[ChatRoomEvent],

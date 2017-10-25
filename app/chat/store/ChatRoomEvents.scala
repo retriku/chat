@@ -15,17 +15,20 @@ private[store] class ChatRoomEvents
   extends PersistentActor
     with LazyLogging {
 
-  case class State(chatRoomEvents: Map[String, ChatRoomEvent] = Map.empty) {
+  case class State(chatRoomEvents: Map[String, List[ChatRoomEvent]] = Map.empty) {
     def updated(event: ChatRoomEvent): State = {
       logger.debug(s"update for: $event")
-      copy(chatRoomEvents = chatRoomEvents.updated(event.room, event))
+      copy(chatRoomEvents =
+        chatRoomEvents.updated(
+          key = event.room,
+          value = chatRoomEvents.get(event.room).map(event :: _).getOrElse(Nil)))
     }
   }
 
   var state = State()
 
   override def receiveRecover: Receive = {
-    case e: ChatEvent ⇒
+    case e: ChatRoomEvent ⇒
       updateState()(e)
   }
 
@@ -42,7 +45,7 @@ private[store] class ChatRoomEvents
   override def persistenceId: String = s"${self.path.name}"
 }
 
-object ChatRoomEvents {
+object ChatRoomEvents extends LazyLogging {
   def props = Props(new ChatRoomEvents)
 
   def persistenceFlow(implicit system: ActorSystem): Flow[ChatRoomEvent, ChatRoomEvent, NotUsed] = {
@@ -64,6 +67,9 @@ object ChatRoomEvents {
       offset = NoOffset
     ).map {
       _.event.asInstanceOf[ChatRoomEvent]
+    }.map { e ⇒
+      logger.debug(s"chatRoomEventSource($room):$e")
+      e
     }
   }
 
